@@ -623,7 +623,7 @@ app.get('/dashboard', requireAuth, (req, res) => {
                         </div>
                     </div>
                     <div class="flex items-center justify-between text-sm text-gray-500">
-                        <span x-text="`Showing ${ paginatedOrders.length } of ${ filteredOrders.length } orders`"></span>
+                        <span x-text="'Showing ' + paginatedOrders.length + ' of ' + filteredOrders.length + ' orders'"></span>
                         <div class="flex items-center space-x-2">
                             <span>Show:</span>
                             <select x-model="pageSize" @change="currentPage = 1; paginateOrders()" class="border border-gray-300 rounded px-2 py-1 text-sm">
@@ -682,7 +682,7 @@ app.get('/dashboard', requireAuth, (req, res) => {
                 <div class="px-6 py-4 border-t border-gray-200" x-show="totalPages > 1">
                     <div class="flex items-center justify-between">
                         <div class="text-sm text-gray-500">
-                            <span x-text="`Page ${ currentPage } of ${ totalPages }`"></span>
+                            <span x-text="'Page ' + currentPage + ' of ' + totalPages"></span>
                         </div>
                         <div class="flex items-center space-x-2">
                             <button 
@@ -883,7 +883,7 @@ app.get('/dashboard', requireAuth, (req, res) => {
 
                         this.sendingToCustomer = true;
                         try {
-                            const response = await fetch(\`/api/orders/\${order.id}/send-to-customer\`, {
+                            const response = await fetch('/api/orders/' + order.id + '/send-to-customer', {
                                 method: 'POST',
                                 headers: {
                                     'Content-Type': 'application/json'
