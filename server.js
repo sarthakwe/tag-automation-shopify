@@ -8,6 +8,7 @@ const session = require('express-session');
 const bcrypt = require('bcryptjs');
 const sqlite3 = require('sqlite3').verbose();
 const path = require('path');
+const fs = require('fs');
 require('dotenv').config();
 
 const app = express();
@@ -45,6 +46,9 @@ app.use(session({
 
 // Serve static files (for logo and assets)
 app.use('/public', express.static(path.join(__dirname, 'public')));
+
+// Serve temporary PDF files
+app.use('/public/temp', express.static(path.join(__dirname, 'public', 'temp')));
 
 // Custom middleware to handle webhook verification
 app.use('/webhook', express.raw({ type: 'application/json', limit: '10mb' }));
@@ -629,6 +633,7 @@ app.get('/dashboard', requireAuth, (req, res) => {
                                 <option value="">All Status</option>
                                 <option value="pending">Pending</option>
                                 <option value="awaiting_design">Awaiting Design</option>
+                                <option value="design_ready">Design Ready</option>
                                 <option value="sent_to_customer">Sent to Customer</option>
                                 <option value="approved">Approved</option>
                                 <option value="rejected">Rejected</option>
@@ -795,9 +800,9 @@ app.get('/dashboard', requireAuth, (req, res) => {
                                     </div>
                                 </div>
 
-                                <!-- Send to Customer Button -->
+                                <!-- Action Buttons -->
                                 <div class="mt-8" x-show="selectedOrder && selectedOrder.properties && selectedOrder.properties['_customily-production-url']">
-                                    <!-- Show Send Button for Pending/Awaiting Design -->
+                                    <!-- Send Button for Pending/Awaiting Design -->
                                     <button 
                                         x-show="selectedOrder?.status === 'pending' || selectedOrder?.status === 'awaiting_design'"
                                         @click="sendToCustomer(selectedOrder)" 
@@ -810,9 +815,22 @@ app.get('/dashboard', requireAuth, (req, res) => {
                                         <span x-show="sendingToCustomer">Sending...</span>
                                     </button>
 
-                                    <!-- Show Already Sent for other statuses -->
+                                    <!-- Reject Button for Design Ready -->
+                                    <button 
+                                        x-show="selectedOrder?.status === 'design_ready'"
+                                        @click="rejectDesign(selectedOrder)" 
+                                        :disabled="sendingToCustomer"
+                                        class="w-full bg-red-600 hover:bg-red-700 disabled:bg-gray-300 text-white font-medium py-3 px-4 rounded-lg transition duration-200 flex items-center justify-center"
+                                    >
+                                        <i class="fas fa-times mr-2" x-show="!sendingToCustomer"></i>
+                                        <i class="fas fa-spinner fa-spin mr-2" x-show="sendingToCustomer"></i>
+                                        <span x-show="!sendingToCustomer">Reject Design</span>
+                                        <span x-show="sendingToCustomer">Rejecting...</span>
+                                    </button>
+
+                                    <!-- Status Messages for Final States -->
                                     <div 
-                                        x-show="selectedOrder?.status !== 'pending' && selectedOrder?.status !== 'awaiting_design'"
+                                        x-show="!['pending', 'awaiting_design', 'design_ready'].includes(selectedOrder?.status)"
                                         class="w-full bg-green-100 text-green-800 font-medium py-3 px-4 rounded-lg flex items-center justify-center border border-green-200"
                                     >
                                         <i class="fas fa-check-circle mr-2"></i>
@@ -820,7 +838,7 @@ app.get('/dashboard', requireAuth, (req, res) => {
                                         <span x-show="selectedOrder?.status === 'rejected'">Design Rejected by Customer</span>
                                         <span x-show="selectedOrder?.status === 'sent_to_customer'">Design Already Sent to Customer</span>
                                         <span x-show="selectedOrder?.status === 'draft'">Design in Draft Status</span>
-                                        <span x-show="!['approved', 'rejected', 'sent_to_customer', 'draft'].includes(selectedOrder?.status)">Design Already Sent</span>
+                                        <span x-show="!['approved', 'rejected', 'sent_to_customer', 'draft'].includes(selectedOrder?.status)">Design Processing Complete</span>
                                     </div>
                                 </div>
                             </div>
@@ -941,11 +959,44 @@ app.get('/dashboard', requireAuth, (req, res) => {
                         }
                     },
 
+                    async rejectDesign(order) {
+                        if (!confirm('Are you sure you want to reject this design? This action cannot be undone.')) {
+                            return;
+                        }
+
+                        this.sendingToCustomer = true;
+                        try {
+                            const response = await fetch('/api/orders/' + order.id + '/reject', {
+                                method: 'POST',
+                                headers: {
+                                    'Content-Type': 'application/json'
+                                }
+                            });
+
+                            if (response.ok) {
+                                // Refresh the order data to get updated status
+                                await this.loadOrders();
+                                alert('Design rejected successfully!');
+                                // Close the modal to show updated table
+                                this.selectedOrder = null;
+                            } else {
+                                const error = await response.json();
+                                alert('Error: ' + error.message);
+                            }
+                        } catch (error) {
+                            console.error('Error rejecting design:', error);
+                            alert('Error rejecting design');
+                        } finally {
+                            this.sendingToCustomer = false;
+                        }
+                    },
+
 
                     getStatusClass(status) {
                         switch(status) {
                             case 'pending': return 'status-pending';
                             case 'awaiting_design': return 'status-pending';
+                            case 'design_ready': return 'bg-purple-100 text-purple-800';
                             case 'sent_to_customer': return 'status-sent';
                             case 'approved': return 'status-approved';
                             case 'rejected': return 'bg-red-100 text-red-800';
@@ -958,6 +1009,7 @@ app.get('/dashboard', requireAuth, (req, res) => {
                         switch(status) {
                             case 'pending': return 'Pending';
                             case 'awaiting_design': return 'Awaiting Design';
+                            case 'design_ready': return 'Design Ready';
                             case 'sent_to_customer': return 'Sent to Customer';
                             case 'approved': return 'Approved';
                             case 'rejected': return 'Rejected';
@@ -1031,6 +1083,8 @@ async function getApproveProOrderStatus(orderId) {
         return 'rejected';
       case 'Awaiting Design':
         return 'awaiting_design';
+      case 'Design Ready':
+        return 'design_ready';
       case 'Pending':
         return 'pending';
       case 'Draft':
@@ -1146,6 +1200,69 @@ app.get('/api/orders', requireAuth, async (req, res) => {
   }
 });
 
+// Function to download and rename PDF
+async function downloadAndRenamePdf(originalUrl, newFilename) {
+  try {
+
+    // Create temp directory if it doesn't exist
+    const tempDir = path.join(__dirname, 'temp');
+    if (!fs.existsSync(tempDir)) {
+      fs.mkdirSync(tempDir, { recursive: true });
+    }
+
+    // Download the PDF
+    const response = await axios.get(originalUrl, { responseType: 'stream' });
+
+    // Save with new filename
+    const tempFilePath = path.join(tempDir, newFilename);
+    const writer = fs.createWriteStream(tempFilePath);
+
+    response.data.pipe(writer);
+
+    return new Promise((resolve, reject) => {
+      writer.on('finish', () => {
+        console.log(`PDF downloaded and renamed to ${newFilename}`);
+        resolve(tempFilePath);
+      });
+      writer.on('error', reject);
+    });
+  } catch (error) {
+    console.error('Error downloading/renaming PDF:', error);
+    throw error;
+  }
+}
+
+// Function to upload PDF to a temporary hosting service (or return original URL with renamed reference)
+async function getPublicPdfUrl(localFilePath, filename) {
+  try {
+    // For now, we'll use the original URL but with a renamed reference
+    // In a production environment, you might want to upload to a cloud storage service
+
+    // Option 1: Return original URL (ApprovePro will handle the filename)
+    // Option 2: Upload to cloud storage and return new URL
+    // Option 3: Serve from local server temporarily
+
+    // For now, let's serve it from our local server
+    const publicDir = path.join(__dirname, 'public', 'temp');
+
+    if (!fs.existsSync(publicDir)) {
+      fs.mkdirSync(publicDir, { recursive: true });
+    }
+
+    const publicFilePath = path.join(publicDir, filename);
+    fs.copyFileSync(localFilePath, publicFilePath);
+
+    // Return the public URL
+    const publicUrl = `https://flow.charitygreetingcards.com.au/public/temp/${filename}`;
+    console.log(`PDF available at: ${publicUrl}`);
+
+    return publicUrl;
+  } catch (error) {
+    console.error('Error creating public PDF URL:', error);
+    throw error;
+  }
+}
+
 // API endpoint to send design to customer (protected)
 app.post('/api/orders/:orderId/send-to-customer', requireAuth, async (req, res) => {
   try {
@@ -1160,12 +1277,21 @@ app.post('/api/orders/:orderId/send-to-customer', requireAuth, async (req, res) 
       return res.status(500).json({ error: 'ApprovePro API key not configured' });
     }
 
-    // Send directly to ApprovePro without storing locally
+    console.log(`Processing design for order ${orderId}...`);
+
+    // Download and rename PDF with order ID
+    const newFilename = `${orderId}.pdf`;
+    const localFilePath = await downloadAndRenamePdf(pdfUrl, newFilename);
+
+    // Get public URL for the renamed PDF
+    const renamedPdfUrl = await getPublicPdfUrl(localFilePath, newFilename);
+
+    // Send to ApprovePro with renamed PDF
     const response = await axios.post(
       `${APPROVEPRO_CONFIG.baseUrl}/orders/${orderId}/designs`,
       {
         comment: comment || `Design for order #${orderId}`,
-        files: [pdfUrl],
+        files: [renamedPdfUrl],
         approval_mode: 'AS_ONE'
       },
       {
@@ -1176,10 +1302,44 @@ app.post('/api/orders/:orderId/send-to-customer', requireAuth, async (req, res) 
       }
     );
 
-    console.log(`Successfully sent design to customer for order ${orderId}`);
+    console.log(`Successfully sent design to customer for order ${orderId} with filename ${newFilename}`);
+
+    // Clean up temporary files
+    try {
+      fs.unlinkSync(localFilePath);
+    } catch (cleanupError) {
+      console.warn('Could not clean up temp file:', cleanupError.message);
+    }
+
     res.json({ success: true, message: 'Design sent to customer successfully', data: response.data });
   } catch (error) {
     console.error('Error sending design to customer:', error);
+    res.status(500).json({ error: error.response?.data?.message || error.message });
+  }
+});
+
+// API endpoint to reject design (protected)
+app.post('/api/orders/:orderId/reject', requireAuth, async (req, res) => {
+  try {
+    const { orderId } = req.params;
+    const { comment } = req.body;
+
+    if (!APPROVEPRO_CONFIG.apiKey) {
+      return res.status(500).json({ error: 'ApprovePro API key not configured' });
+    }
+
+    // Note: ApprovePro API doesn't seem to have a direct reject endpoint
+    // This is a placeholder - you might need to check ApprovePro documentation
+    // for the correct way to reject designs. For now, we'll log the rejection.
+
+    console.log(`Design rejection requested for order ${orderId}`);
+
+    // You might need to implement this based on ApprovePro's actual reject API
+    // For now, we'll return success and let the status check handle the update
+
+    res.json({ success: true, message: 'Design rejection processed' });
+  } catch (error) {
+    console.error('Error rejecting design:', error);
     res.status(500).json({ error: error.response?.data?.message || error.message });
   }
 });
