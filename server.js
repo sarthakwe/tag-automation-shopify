@@ -797,19 +797,31 @@ app.get('/dashboard', requireAuth, (req, res) => {
 
                                 <!-- Send to Customer Button -->
                                 <div class="mt-8" x-show="selectedOrder && selectedOrder.properties && selectedOrder.properties['_customily-production-url']">
+                                    <!-- Show Send Button for Pending/Awaiting Design -->
                                     <button 
+                                        x-show="selectedOrder?.status === 'pending' || selectedOrder?.status === 'awaiting_design'"
                                         @click="sendToCustomer(selectedOrder)" 
-                                        :disabled="selectedOrder?.status === 'sent_to_customer' || sendingToCustomer"
+                                        :disabled="sendingToCustomer"
                                         class="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300 text-white font-medium py-3 px-4 rounded-lg transition duration-200 flex items-center justify-center"
                                     >
                                         <i class="fas fa-paper-plane mr-2" x-show="!sendingToCustomer"></i>
                                         <i class="fas fa-spinner fa-spin mr-2" x-show="sendingToCustomer"></i>
-                                        <span x-show="!sendingToCustomer">
-                                            <span x-show="selectedOrder?.status === 'pending'">Send to Customer</span>
-                                            <span x-show="selectedOrder?.status === 'sent_to_customer'">Already Sent</span>
-                                        </span>
+                                        <span x-show="!sendingToCustomer">Send to Customer</span>
                                         <span x-show="sendingToCustomer">Sending...</span>
                                     </button>
+
+                                    <!-- Show Already Sent for other statuses -->
+                                    <div 
+                                        x-show="selectedOrder?.status !== 'pending' && selectedOrder?.status !== 'awaiting_design'"
+                                        class="w-full bg-green-100 text-green-800 font-medium py-3 px-4 rounded-lg flex items-center justify-center border border-green-200"
+                                    >
+                                        <i class="fas fa-check-circle mr-2"></i>
+                                        <span x-show="selectedOrder?.status === 'approved'">Design Approved by Customer</span>
+                                        <span x-show="selectedOrder?.status === 'rejected'">Design Rejected by Customer</span>
+                                        <span x-show="selectedOrder?.status === 'sent_to_customer'">Design Already Sent to Customer</span>
+                                        <span x-show="selectedOrder?.status === 'draft'">Design in Draft Status</span>
+                                        <span x-show="!['approved', 'rejected', 'sent_to_customer', 'draft'].includes(selectedOrder?.status)">Design Already Sent</span>
+                                    </div>
                                 </div>
                             </div>
 
@@ -912,9 +924,11 @@ app.get('/dashboard', requireAuth, (req, res) => {
                             });
 
                             if (response.ok) {
-                                order.status = 'sent_to_customer';
-                                order.sentAt = new Date().toISOString();
+                                // Refresh the order data to get updated status from ApprovePro
+                                await this.loadOrders();
                                 alert('Design sent to customer successfully!');
+                                // Close the modal to show updated table
+                                this.selectedOrder = null;
                             } else {
                                 const error = await response.json();
                                 alert('Error: ' + error.message);
