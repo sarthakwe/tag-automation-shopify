@@ -547,8 +547,8 @@ app.get('/dashboard', requireAuth, (req, res) => {
                     </div>
                     <div class="flex items-center space-x-4">
                         <div class="text-right">
-                            <div class="text-2xl font-bold text-blue-600" x-text="orders.length"></div>
-                            <div class="text-sm text-gray-500">Total Orders</div>
+                            <div class="text-2xl font-bold text-blue-600" x-text="filteredOrders.length"></div>
+                            <div class="text-sm text-gray-500">Filtered Orders</div>
                         </div>
                         <form method="POST" action="/logout" class="inline">
                             <button type="submit" class="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition duration-200 flex items-center">
@@ -568,7 +568,7 @@ app.get('/dashboard', requireAuth, (req, res) => {
                             <i class="fas fa-clock text-yellow-600"></i>
                         </div>
                         <div class="ml-4">
-                            <div class="text-2xl font-bold text-gray-900" x-text="getOrdersByStatus('pending').length"></div>
+                            <div class="text-2xl font-bold text-gray-900" x-text="getFilteredOrdersByStatus('pending').length"></div>
                             <div class="text-sm text-gray-500">Pending Orders</div>
                         </div>
                     </div>
@@ -579,7 +579,7 @@ app.get('/dashboard', requireAuth, (req, res) => {
                             <i class="fas fa-paper-plane text-blue-600"></i>
                         </div>
                         <div class="ml-4">
-                            <div class="text-2xl font-bold text-gray-900" x-text="getOrdersByStatus('sent_to_customer').length"></div>
+                            <div class="text-2xl font-bold text-gray-900" x-text="getFilteredOrdersByStatus('sent_to_customer').length"></div>
                             <div class="text-sm text-gray-500">Sent to Customer</div>
                         </div>
                     </div>
@@ -590,7 +590,7 @@ app.get('/dashboard', requireAuth, (req, res) => {
                             <i class="fas fa-check-circle text-green-600"></i>
                         </div>
                         <div class="ml-4">
-                            <div class="text-2xl font-bold text-gray-900" x-text="getOrdersByStatus('approved').length"></div>
+                            <div class="text-2xl font-bold text-gray-900" x-text="getFilteredOrdersByStatus('approved').length"></div>
                             <div class="text-sm text-gray-500">Approved</div>
                         </div>
                     </div>
@@ -600,7 +600,41 @@ app.get('/dashboard', requireAuth, (req, res) => {
             <!-- Orders Table -->
             <div class="bg-white rounded-lg shadow-sm overflow-hidden">
                 <div class="p-6 border-b border-gray-200">
-                    <h2 class="text-xl font-semibold text-gray-900">Recent Orders</h2>
+                    <div class="flex items-center justify-between mb-4">
+                        <h2 class="text-xl font-semibold text-gray-900">Recent Orders</h2>
+                        <div class="flex items-center space-x-4">
+                            <div class="relative">
+                                <input 
+                                    type="text" 
+                                    x-model="searchTerm" 
+                                    @input="filterOrders()"
+                                    placeholder="Search orders..." 
+                                    class="pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 w-64"
+                                >
+                                <i class="fas fa-search absolute left-3 top-3 text-gray-400"></i>
+                            </div>
+                            <select x-model="statusFilter" @change="filterOrders()" class="border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+                                <option value="">All Status</option>
+                                <option value="pending">Pending</option>
+                                <option value="sent_to_customer">Sent to Customer</option>
+                                <option value="approved">Approved</option>
+                                <option value="rejected">Rejected</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="flex items-center justify-between text-sm text-gray-500">
+                        <span x-text="`Showing ${ paginatedOrders.length } of ${ filteredOrders.length } orders`"></span>
+                        <div class="flex items-center space-x-2">
+                            <span>Show:</span>
+                            <select x-model="pageSize" @change="currentPage = 1; paginateOrders()" class="border border-gray-300 rounded px-2 py-1 text-sm">
+                                <option value="10">10</option>
+                                <option value="25">25</option>
+                                <option value="50">50</option>
+                                <option value="100">100</option>
+                            </select>
+                            <span>per page</span>
+                        </div>
+                    </div>
                 </div>
                 <div class="overflow-x-auto">
                     <table class="w-full">
@@ -615,7 +649,7 @@ app.get('/dashboard', requireAuth, (req, res) => {
                             </tr>
                         </thead>
                         <tbody class="bg-white divide-y divide-gray-200">
-                            <template x-for="order in orders" :key="order.id">
+                            <template x-for="order in paginatedOrders" :key="order.id">
                                 <tr class="hover:bg-gray-50 cursor-pointer" @click="viewOrder(order)">
                                     <td class="px-6 py-4 whitespace-nowrap">
                                         <div class="text-sm font-medium text-gray-900" x-text="'#' + order.orderNumber"></div>
@@ -643,6 +677,45 @@ app.get('/dashboard', requireAuth, (req, res) => {
                             </template>
                         </tbody>
                     </table>
+                </div>
+                <!-- Pagination -->
+                <div class="px-6 py-4 border-t border-gray-200" x-show="totalPages > 1">
+                    <div class="flex items-center justify-between">
+                        <div class="text-sm text-gray-500">
+                            <span x-text="`Page ${ currentPage } of ${ totalPages }`"></span>
+                        </div>
+                        <div class="flex items-center space-x-2">
+                            <button 
+                                @click="currentPage = 1; paginateOrders()" 
+                                :disabled="currentPage === 1"
+                                class="px-3 py-1 rounded border disabled:bg-gray-100 disabled:text-gray-400 hover:bg-gray-50"
+                            >
+                                <i class="fas fa-angle-double-left"></i>
+                            </button>
+                            <button 
+                                @click="currentPage--; paginateOrders()" 
+                                :disabled="currentPage === 1"
+                                class="px-3 py-1 rounded border disabled:bg-gray-100 disabled:text-gray-400 hover:bg-gray-50"
+                            >
+                                <i class="fas fa-angle-left"></i>
+                            </button>
+                            <span class="px-3 py-1 bg-blue-100 text-blue-800 rounded font-medium" x-text="currentPage"></span>
+                            <button 
+                                @click="currentPage++; paginateOrders()" 
+                                :disabled="currentPage === totalPages"
+                                class="px-3 py-1 rounded border disabled:bg-gray-100 disabled:text-gray-400 hover:bg-gray-50"
+                            >
+                                <i class="fas fa-angle-right"></i>
+                            </button>
+                            <button 
+                                @click="currentPage = totalPages; paginateOrders()" 
+                                :disabled="currentPage === totalPages"
+                                class="px-3 py-1 rounded border disabled:bg-gray-100 disabled:text-gray-400 hover:bg-gray-50"
+                            >
+                                <i class="fas fa-angle-double-right"></i>
+                            </button>
+                        </div>
+                    </div>
                 </div>
             </div>
 
@@ -740,17 +813,61 @@ app.get('/dashboard', requireAuth, (req, res) => {
             function orderDashboard() {
                 return {
                     orders: [],
+                    filteredOrders: [],
+                    paginatedOrders: [],
                     selectedOrder: null,
                     sendingToCustomer: false,
+                    searchTerm: '',
+                    statusFilter: '',
+                    currentPage: 1,
+                    pageSize: 25,
+                    totalPages: 1,
 
                     async loadOrders() {
                         try {
+                            console.log('Loading orders from Shopify...');
                             const response = await fetch('/api/orders');
-                            this.orders = await response.json();
-                            console.log('Loaded orders:', this.orders.length);
+                            if (response.ok) {
+                                this.orders = await response.json();
+                                console.log('Loaded orders:', this.orders.length);
+                                this.filterOrders();
+                            } else {
+                                console.error('Failed to load orders:', response.statusText);
+                            }
                         } catch (error) {
                             console.error('Error loading orders:', error);
                         }
+                    },
+
+                    filterOrders() {
+                        let filtered = this.orders;
+
+                        // Filter by search term
+                        if (this.searchTerm) {
+                            const searchLower = this.searchTerm.toLowerCase();
+                            filtered = filtered.filter(order => 
+                                order.orderNumber.toLowerCase().includes(searchLower) ||
+                                order.customerName.toLowerCase().includes(searchLower) ||
+                                order.customerEmail?.toLowerCase().includes(searchLower) ||
+                                order.charityValue?.toLowerCase().includes(searchLower)
+                            );
+                        }
+
+                        // Filter by status
+                        if (this.statusFilter) {
+                            filtered = filtered.filter(order => order.status === this.statusFilter);
+                        }
+
+                        this.filteredOrders = filtered;
+                        this.currentPage = 1;
+                        this.paginateOrders();
+                    },
+
+                    paginateOrders() {
+                        this.totalPages = Math.ceil(this.filteredOrders.length / this.pageSize);
+                        const start = (this.currentPage - 1) * this.pageSize;
+                        const end = start + parseInt(this.pageSize);
+                        this.paginatedOrders = this.filteredOrders.slice(start, end);
                     },
 
 
@@ -794,6 +911,10 @@ app.get('/dashboard', requireAuth, (req, res) => {
 
                     getOrdersByStatus(status) {
                         return this.orders.filter(order => order.status === status);
+                    },
+
+                    getFilteredOrdersByStatus(status) {
+                        return this.filteredOrders.filter(order => order.status === status);
                     },
 
                     getStatusClass(status) {
@@ -877,7 +998,8 @@ app.get('/api/orders', requireAuth, async (req, res) => {
       return res.status(500).json({ error: 'Shopify configuration missing' });
     }
 
-    const url = `https://${SHOPIFY_CONFIG.shopDomain}/admin/api/${SHOPIFY_CONFIG.apiVersion}/orders.json?limit=50&status=any`;
+    const limit = req.query.limit || 100; // Allow up to 100 orders
+    const url = `https://${SHOPIFY_CONFIG.shopDomain}/admin/api/${SHOPIFY_CONFIG.apiVersion}/orders.json?limit=${limit}&status=any`;
 
     const response = await axios.get(url, {
       headers: {
