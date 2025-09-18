@@ -43,6 +43,9 @@ app.use(session({
   }
 }));
 
+// Serve static files (for logo and assets)
+app.use('/public', express.static(path.join(__dirname, 'public')));
+
 // Custom middleware to handle webhook verification
 app.use('/webhook', express.raw({ type: 'application/json', limit: '10mb' }));
 app.use(express.json({ limit: '10mb' }));
@@ -416,11 +419,14 @@ app.get('/login', (req, res) => {
         <div class="max-w-md w-full mx-4">
             <div class="bg-white rounded-lg shadow-xl p-8">
                 <div class="text-center mb-8">
-                    <div class="mx-auto w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center mb-4">
-                        <i class="fas fa-lock text-2xl text-blue-600"></i>
+                    <div class="mx-auto mb-6">
+                        <img src="/public/images/logo.png" alt="Charity Greeting Cards" class="mx-auto h-16 w-auto" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
+                        <div class="mx-auto w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center" style="display: none;">
+                            <i class="fas fa-heart text-2xl text-blue-600"></i>
+                        </div>
                     </div>
-                    <h1 class="text-2xl font-bold text-gray-900">Order Management</h1>
-                    <p class="text-gray-600 mt-2">Sign in to access the dashboard</p>
+                    <h1 class="text-2xl font-bold text-gray-900">Charity Greeting Cards</h1>
+                    <p class="text-gray-600 mt-2">Order Management System</p>
                 </div>
 
                 ${req.query.error ? `
@@ -472,7 +478,7 @@ app.get('/login', (req, res) => {
 
                 <div class="mt-8 text-center">
                     <p class="text-xs text-gray-500">
-                        Charity Greeting Cards - Order Management System
+                        © Charity Greeting Cards Pty Ltd - Secure Order Management System
                     </p>
                 </div>
             </div>
@@ -541,9 +547,14 @@ app.get('/dashboard', requireAuth, (req, res) => {
             <!-- Header -->
             <div class="bg-white rounded-lg shadow-sm p-6 mb-8">
                 <div class="flex items-center justify-between">
-                    <div>
-                        <h1 class="text-3xl font-bold text-gray-900">Order Management Dashboard</h1>
-                        <p class="text-gray-600 mt-2">Manage greeting card orders and send designs to customers</p>
+                    <div class="flex items-center space-x-4">
+                        <div>
+                            <img src="/public/images/logo.png" alt="Charity Greeting Cards" class="h-12 w-auto" onerror="this.style.display='none';">
+                        </div>
+                        <div>
+                            <h1 class="text-3xl font-bold text-gray-900">Order Management Dashboard</h1>
+                            <p class="text-gray-600 mt-2">Charity Greeting Cards - Manage orders and send designs</p>
+                        </div>
                     </div>
                     <div class="flex items-center space-x-4">
                         <div class="text-right">
@@ -568,8 +579,8 @@ app.get('/dashboard', requireAuth, (req, res) => {
                             <i class="fas fa-clock text-yellow-600"></i>
                         </div>
                         <div class="ml-4">
-                            <div class="text-2xl font-bold text-gray-900" x-text="statusCounts.pending"></div>
-                            <div class="text-sm text-gray-500">Pending Orders</div>
+                            <div class="text-2xl font-bold text-gray-900" x-text="statusCounts.awaiting_design + statusCounts.pending"></div>
+                            <div class="text-sm text-gray-500">Awaiting Design</div>
                         </div>
                     </div>
                 </div>
@@ -616,9 +627,11 @@ app.get('/dashboard', requireAuth, (req, res) => {
                             <select x-model="statusFilter" @change="filterOrders()" class="border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
                                 <option value="">All Status</option>
                                 <option value="pending">Pending</option>
+                                <option value="awaiting_design">Awaiting Design</option>
                                 <option value="sent_to_customer">Sent to Customer</option>
                                 <option value="approved">Approved</option>
                                 <option value="rejected">Rejected</option>
+                                <option value="draft">Draft</option>
                             </select>
                         </div>
                     </div>
@@ -692,14 +705,8 @@ app.get('/dashboard', requireAuth, (req, res) => {
                         <div class="text-sm text-gray-500">
                             <span x-text="'Page ' + currentPage + ' of ' + totalPages"></span>
                         </div>
-                        <div class="flex items-center space-x-2">
-                            <button 
-                                @click="changePage(1)" 
-                                :disabled="currentPage === 1 || loading"
-                                class="px-3 py-1 rounded border disabled:bg-gray-100 disabled:text-gray-400 hover:bg-gray-50"
-                            >
-                                <i class="fas fa-angle-double-left"></i>
-                            </button>
+                        <div class="flex items-center space-x-1">
+                            <!-- Previous Button -->
                             <button 
                                 @click="changePage(currentPage - 1)" 
                                 :disabled="currentPage === 1 || loading"
@@ -707,20 +714,25 @@ app.get('/dashboard', requireAuth, (req, res) => {
                             >
                                 <i class="fas fa-angle-left"></i>
                             </button>
-                            <span class="px-3 py-1 bg-blue-100 text-blue-800 rounded font-medium" x-text="currentPage"></span>
+                            
+                            <!-- Page Numbers -->
+                            <template x-for="page in getPageNumbers()" :key="page">
+                                <button 
+                                    @click="changePage(page)" 
+                                    :disabled="loading"
+                                    :class="page === currentPage ? 'bg-blue-600 text-white' : 'bg-white text-gray-700 hover:bg-gray-50'"
+                                    class="px-3 py-1 rounded border font-medium transition duration-200"
+                                    x-text="page"
+                                ></button>
+                            </template>
+                            
+                            <!-- Next Button -->
                             <button 
                                 @click="changePage(currentPage + 1)" 
                                 :disabled="currentPage === totalPages || loading"
                                 class="px-3 py-1 rounded border disabled:bg-gray-100 disabled:text-gray-400 hover:bg-gray-50"
                             >
                                 <i class="fas fa-angle-right"></i>
-                            </button>
-                            <button 
-                                @click="changePage(totalPages)" 
-                                :disabled="currentPage === totalPages || loading"
-                                class="px-3 py-1 rounded border disabled:bg-gray-100 disabled:text-gray-400 hover:bg-gray-50"
-                            >
-                                <i class="fas fa-angle-double-right"></i>
                             </button>
                         </div>
                     </div>
@@ -832,9 +844,11 @@ app.get('/dashboard', requireAuth, (req, res) => {
                     totalOrders: 0,
                     statusCounts: {
                         pending: 0,
+                        awaiting_design: 0,
                         sent_to_customer: 0,
                         approved: 0,
-                        rejected: 0
+                        rejected: 0,
+                        draft: 0
                     },
 
                     async loadOrders() {
@@ -925,8 +939,11 @@ app.get('/dashboard', requireAuth, (req, res) => {
                     getStatusClass(status) {
                         switch(status) {
                             case 'pending': return 'status-pending';
+                            case 'awaiting_design': return 'status-pending';
                             case 'sent_to_customer': return 'status-sent';
                             case 'approved': return 'status-approved';
+                            case 'rejected': return 'bg-red-100 text-red-800';
+                            case 'draft': return 'bg-gray-100 text-gray-800';
                             default: return 'status-pending';
                         }
                     },
@@ -934,10 +951,31 @@ app.get('/dashboard', requireAuth, (req, res) => {
                     getStatusText(status) {
                         switch(status) {
                             case 'pending': return 'Pending';
+                            case 'awaiting_design': return 'Awaiting Design';
                             case 'sent_to_customer': return 'Sent to Customer';
                             case 'approved': return 'Approved';
-                            default: return 'Pending';
+                            case 'rejected': return 'Rejected';
+                            case 'draft': return 'Draft';
+                            default: return status.charAt(0).toUpperCase() + status.slice(1).replace(/_/g, ' ');
                         }
+                    },
+
+                    getPageNumbers() {
+                        const pages = [];
+                        const maxVisible = 5;
+                        let start = Math.max(1, this.currentPage - Math.floor(maxVisible / 2));
+                        let end = Math.min(this.totalPages, start + maxVisible - 1);
+                        
+                        // Adjust start if we're near the end
+                        if (end - start + 1 < maxVisible) {
+                            start = Math.max(1, end - maxVisible + 1);
+                        }
+                        
+                        for (let i = start; i <= end; i++) {
+                            pages.push(i);
+                        }
+                        
+                        return pages;
                     },
 
                     formatDate(dateString) {
@@ -976,16 +1014,23 @@ async function getApproveProOrderStatus(orderId) {
 
     const approveProOrder = response.data;
 
-    // Map ApprovePro status to our status
-    switch (approveProOrder.status) {
+    // Return the exact ApprovePro status
+    const status = approveProOrder.status || 'Pending';
+
+    // Map common ApprovePro statuses to display names
+    switch (status) {
       case 'Approved':
         return 'approved';
       case 'Rejected':
         return 'rejected';
+      case 'Awaiting Design':
+        return 'awaiting_design';
       case 'Pending':
+        return 'pending';
+      case 'Draft':
+        return 'draft';
       default:
-        // Check if design has been sent (has designs)
-        return approveProOrder.can_add_design === false ? 'sent_to_customer' : 'pending';
+        return status.toLowerCase().replace(/\s+/g, '_');
     }
   } catch (error) {
     // If order doesn't exist in ApprovePro or API error, assume pending
@@ -1074,9 +1119,11 @@ app.get('/api/orders', requireAuth, async (req, res) => {
     // Calculate status counts for stats
     const statusCounts = {
       pending: filteredOrders.filter(o => o.status === 'pending').length,
+      awaiting_design: filteredOrders.filter(o => o.status === 'awaiting_design').length,
       sent_to_customer: filteredOrders.filter(o => o.status === 'sent_to_customer').length,
       approved: filteredOrders.filter(o => o.status === 'approved').length,
-      rejected: filteredOrders.filter(o => o.status === 'rejected').length
+      rejected: filteredOrders.filter(o => o.status === 'rejected').length,
+      draft: filteredOrders.filter(o => o.status === 'draft').length
     };
 
     console.log(`Returning page ${page}/${totalPages} with ${paginatedOrders.length} orders`);
