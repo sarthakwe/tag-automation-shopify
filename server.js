@@ -831,6 +831,43 @@ app.get('/dashboard', requireAuth, (req, res) => {
   `);
 });
 
+// Get ApprovePro order status
+async function getApproveProOrderStatus(orderId) {
+  try {
+    if (!APPROVEPRO_CONFIG.apiKey) {
+      return 'pending'; // Default if no API key
+    }
+
+    const response = await axios.get(
+      `${APPROVEPRO_CONFIG.baseUrl}/orders/${orderId}`,
+      {
+        headers: {
+          'Authorization': `Bearer ${APPROVEPRO_CONFIG.apiKey}`,
+          'Content-Type': 'application/json'
+        }
+      }
+    );
+
+    const approveProOrder = response.data;
+
+    // Map ApprovePro status to our status
+    switch (approveProOrder.status) {
+      case 'Approved':
+        return 'approved';
+      case 'Rejected':
+        return 'rejected';
+      case 'Pending':
+      default:
+        // Check if design has been sent (has designs)
+        return approveProOrder.can_add_design === false ? 'sent_to_customer' : 'pending';
+    }
+  } catch (error) {
+    // If order doesn't exist in ApprovePro or API error, assume pending
+    console.log(`ApprovePro status check failed for order ${orderId}: ${error.message}`);
+    return 'pending';
+  }
+}
+
 // API endpoint to get all orders from Shopify (protected)
 app.get('/api/orders', requireAuth, async (req, res) => {
   try {
@@ -852,21 +889,30 @@ app.get('/api/orders', requireAuth, async (req, res) => {
     const shopifyOrders = response.data.orders || [];
     console.log(`Fetched ${shopifyOrders.length} orders from Shopify`);
 
-    // Transform Shopify orders to our format
-    const orders = shopifyOrders.map(order => ({
-      id: order.id,
-      orderNumber: order.order_number || order.name,
-      customerName: `${order.customer?.first_name || ''} ${order.customer?.last_name || ''}`.trim() || 'Unknown',
-      customerEmail: order.customer?.email,
-      totalPrice: order.total_price,
-      createdAt: order.created_at,
-      properties: extractCustomilyProperties(order.line_items || []),
-      charityValue: extractCharityFromProperties(order.line_items || []),
-      status: 'pending', // Default status for display
-      sentAt: null,
-      approveProOrderId: null
+    // Transform Shopify orders and get ApprovePro status
+    const orders = await Promise.all(shopifyOrders.map(async (order) => {
+      const properties = extractCustomilyProperties(order.line_items || []);
+      const charityValue = extractCharityFromProperties(order.line_items || []);
+
+      // Get ApprovePro status for this order
+      const approveProStatus = await getApproveProOrderStatus(order.id);
+
+      return {
+        id: order.id,
+        orderNumber: order.order_number || order.name,
+        customerName: `${order.customer?.first_name || ''} ${order.customer?.last_name || ''}`.trim() || 'Unknown',
+        customerEmail: order.customer?.email,
+        totalPrice: order.total_price,
+        createdAt: order.created_at,
+        properties: properties,
+        charityValue: charityValue,
+        status: approveProStatus, // Real status from ApprovePro
+        sentAt: approveProStatus === 'sent_to_customer' ? order.updated_at : null,
+        approveProOrderId: order.id
+      };
     }));
 
+    console.log(`Returning ${orders.length} orders with ApprovePro status`);
     res.json(orders);
   } catch (error) {
     console.error('Error fetching orders from Shopify:', error.response?.data || error.message);
