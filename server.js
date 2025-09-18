@@ -304,6 +304,37 @@ function storeOrderData(order) {
   return orderData;
 }
 
+// Fetch orders from Shopify API
+async function fetchOrdersFromShopify(limit = 50) {
+  try {
+    if (!SHOPIFY_CONFIG.accessToken || !SHOPIFY_CONFIG.shopDomain) {
+      throw new Error('Shopify configuration missing');
+    }
+
+    const url = `https://${SHOPIFY_CONFIG.shopDomain}/admin/api/${SHOPIFY_CONFIG.apiVersion}/orders.json?limit=${limit}&status=any`;
+
+    const response = await axios.get(url, {
+      headers: {
+        'X-Shopify-Access-Token': SHOPIFY_CONFIG.accessToken,
+        'Content-Type': 'application/json'
+      }
+    });
+
+    const orders = response.data.orders || [];
+    console.log(`Fetched ${orders.length} orders from Shopify`);
+
+    // Store each order in our system
+    orders.forEach(order => {
+      storeOrderData(order);
+    });
+
+    return orders;
+  } catch (error) {
+    console.error('Error fetching orders from Shopify:', error.response?.data || error.message);
+    throw error;
+  }
+}
+
 // Send design to customer via ApprovePro API
 async function sendDesignToCustomer(orderId, customilPdfUrl, comment = '') {
   try {
@@ -716,10 +747,12 @@ app.get('/dashboard', requireAuth, (req, res) => {
                         try {
                             const response = await fetch('/api/orders');
                             this.orders = await response.json();
+                            console.log('Loaded orders:', this.orders.length);
                         } catch (error) {
                             console.error('Error loading orders:', error);
                         }
                     },
+
 
                     viewOrder(order) {
                         this.selectedOrder = order;
@@ -798,16 +831,46 @@ app.get('/dashboard', requireAuth, (req, res) => {
   `);
 });
 
-// API endpoint to get all orders (protected)
-app.get('/api/orders', requireAuth, (req, res) => {
+// API endpoint to get all orders from Shopify (protected)
+app.get('/api/orders', requireAuth, async (req, res) => {
   try {
-    const orders = Array.from(orderStorage.values()).sort((a, b) =>
-      new Date(b.createdAt) - new Date(a.createdAt)
-    );
+    console.log('Fetching orders directly from Shopify...');
+
+    if (!SHOPIFY_CONFIG.accessToken || !SHOPIFY_CONFIG.shopDomain) {
+      return res.status(500).json({ error: 'Shopify configuration missing' });
+    }
+
+    const url = `https://${SHOPIFY_CONFIG.shopDomain}/admin/api/${SHOPIFY_CONFIG.apiVersion}/orders.json?limit=50&status=any`;
+
+    const response = await axios.get(url, {
+      headers: {
+        'X-Shopify-Access-Token': SHOPIFY_CONFIG.accessToken,
+        'Content-Type': 'application/json'
+      }
+    });
+
+    const shopifyOrders = response.data.orders || [];
+    console.log(`Fetched ${shopifyOrders.length} orders from Shopify`);
+
+    // Transform Shopify orders to our format
+    const orders = shopifyOrders.map(order => ({
+      id: order.id,
+      orderNumber: order.order_number || order.name,
+      customerName: `${order.customer?.first_name || ''} ${order.customer?.last_name || ''}`.trim() || 'Unknown',
+      customerEmail: order.customer?.email,
+      totalPrice: order.total_price,
+      createdAt: order.created_at,
+      properties: extractCustomilyProperties(order.line_items || []),
+      charityValue: extractCharityFromProperties(order.line_items || []),
+      status: 'pending', // Default status for display
+      sentAt: null,
+      approveProOrderId: null
+    }));
+
     res.json(orders);
   } catch (error) {
-    console.error('Error fetching orders:', error);
-    res.status(500).json({ error: 'Failed to fetch orders' });
+    console.error('Error fetching orders from Shopify:', error.response?.data || error.message);
+    res.status(500).json({ error: 'Failed to fetch orders from Shopify' });
   }
 });
 
@@ -821,11 +884,31 @@ app.post('/api/orders/:orderId/send-to-customer', requireAuth, async (req, res) 
       return res.status(400).json({ error: 'PDF URL is required' });
     }
 
-    const result = await sendDesignToCustomer(orderId, pdfUrl, comment);
-    res.json({ success: true, message: 'Design sent to customer successfully', data: result });
+    if (!APPROVEPRO_CONFIG.apiKey) {
+      return res.status(500).json({ error: 'ApprovePro API key not configured' });
+    }
+
+    // Send directly to ApprovePro without storing locally
+    const response = await axios.post(
+      `${APPROVEPRO_CONFIG.baseUrl}/orders/${orderId}/designs`,
+      {
+        comment: comment || `Design for order #${orderId}`,
+        files: [pdfUrl],
+        approval_mode: 'AS_ONE'
+      },
+      {
+        headers: {
+          'Authorization': `Bearer ${APPROVEPRO_CONFIG.apiKey}`,
+          'Content-Type': 'application/json'
+        }
+      }
+    );
+
+    console.log(`Successfully sent design to customer for order ${orderId}`);
+    res.json({ success: true, message: 'Design sent to customer successfully', data: response.data });
   } catch (error) {
     console.error('Error sending design to customer:', error);
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ error: error.response?.data?.message || error.message });
   }
 });
 
