@@ -557,10 +557,6 @@ app.get('/dashboard', requireAuth, (req, res) => {
                         </div>
                     </div>
                     <div class="flex items-center space-x-4">
-                        <div class="text-right">
-                            <div class="text-2xl font-bold text-blue-600" x-text="totalOrders"></div>
-                            <div class="text-sm text-gray-500">Total Orders</div>
-                        </div>
                         <form method="POST" action="/logout" class="inline">
                             <button type="submit" class="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition duration-200 flex items-center">
                                 <i class="fas fa-sign-out-alt mr-2"></i>
@@ -571,42 +567,6 @@ app.get('/dashboard', requireAuth, (req, res) => {
                 </div>
             </div>
 
-            <!-- Stats Cards -->
-            <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-                <div class="bg-white p-6 rounded-lg shadow-sm">
-                    <div class="flex items-center">
-                        <div class="p-3 rounded-full bg-yellow-100">
-                            <i class="fas fa-clock text-yellow-600"></i>
-                        </div>
-                        <div class="ml-4">
-                            <div class="text-2xl font-bold text-gray-900" x-text="statusCounts.awaiting_design + statusCounts.pending"></div>
-                            <div class="text-sm text-gray-500">Awaiting Design</div>
-                        </div>
-                    </div>
-                </div>
-                <div class="bg-white p-6 rounded-lg shadow-sm">
-                    <div class="flex items-center">
-                        <div class="p-3 rounded-full bg-blue-100">
-                            <i class="fas fa-paper-plane text-blue-600"></i>
-                        </div>
-                        <div class="ml-4">
-                            <div class="text-2xl font-bold text-gray-900" x-text="statusCounts.sent_to_customer"></div>
-                            <div class="text-sm text-gray-500">Sent to Customer</div>
-                        </div>
-                    </div>
-                </div>
-                <div class="bg-white p-6 rounded-lg shadow-sm">
-                    <div class="flex items-center">
-                        <div class="p-3 rounded-full bg-green-100">
-                            <i class="fas fa-check-circle text-green-600"></i>
-                        </div>
-                        <div class="ml-4">
-                            <div class="text-2xl font-bold text-gray-900" x-text="statusCounts.approved"></div>
-                            <div class="text-sm text-gray-500">Approved</div>
-                        </div>
-                    </div>
-                </div>
-            </div>
 
             <!-- Orders Table -->
             <div class="bg-white rounded-lg shadow-sm overflow-hidden">
@@ -842,14 +802,6 @@ app.get('/dashboard', requireAuth, (req, res) => {
                     pageSize: 25,
                     totalPages: 1,
                     totalOrders: 0,
-                    statusCounts: {
-                        pending: 0,
-                        awaiting_design: 0,
-                        sent_to_customer: 0,
-                        approved: 0,
-                        rejected: 0,
-                        draft: 0
-                    },
 
                     async loadOrders() {
                         this.loading = true;
@@ -869,7 +821,6 @@ app.get('/dashboard', requireAuth, (req, res) => {
                                 this.orders = data.orders;
                                 this.totalPages = data.pagination.totalPages;
                                 this.totalOrders = data.pagination.totalOrders;
-                                this.statusCounts = data.statusCounts;
                                 console.log('Loaded orders:', this.orders.length, 'of', this.totalOrders);
                             } else {
                                 console.error('Failed to load orders:', response.statusText);
@@ -1116,15 +1067,6 @@ app.get('/api/orders', requireAuth, async (req, res) => {
     const endIndex = startIndex + pageSize;
     const paginatedOrders = filteredOrders.slice(startIndex, endIndex);
 
-    // Calculate status counts for stats
-    const statusCounts = {
-      pending: filteredOrders.filter(o => o.status === 'pending').length,
-      awaiting_design: filteredOrders.filter(o => o.status === 'awaiting_design').length,
-      sent_to_customer: filteredOrders.filter(o => o.status === 'sent_to_customer').length,
-      approved: filteredOrders.filter(o => o.status === 'approved').length,
-      rejected: filteredOrders.filter(o => o.status === 'rejected').length,
-      draft: filteredOrders.filter(o => o.status === 'draft').length
-    };
 
     console.log(`Returning page ${page}/${totalPages} with ${paginatedOrders.length} orders`);
 
@@ -1138,7 +1080,6 @@ app.get('/api/orders', requireAuth, async (req, res) => {
         hasNextPage: page < totalPages,
         hasPrevPage: page > 1
       },
-      statusCounts: statusCounts,
       filters: {
         search: search,
         status: statusFilter
