@@ -28,7 +28,10 @@
     "dotenv": "^16.3.1",
     "helmet": "^7.1.0",
     "cors": "^2.8.5",
-    "nodemailer": "^6.9.7"
+    "nodemailer": "^6.9.7",
+    "express-session": "^1.17.3",
+    "bcryptjs": "^2.4.3",
+    "sqlite3": "^5.1.6"
   },
   "devDependencies": {
     "nodemon": "^3.0.1",
