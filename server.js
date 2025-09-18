@@ -96,7 +96,7 @@ db.serialize(() => {
 // Initialize admin user
 async function initializeAdminUser() {
   const adminUsername = process.env.ADMIN_USERNAME || 'admin';
-  const adminPassword = process.env.ADMIN_PASSWORD || 'admin123';
+  const adminPassword = process.env.ADMIN_PASSWORD || 'Q<56K(*JZ';
 
   db.get('SELECT * FROM users WHERE username = ?', [adminUsername], async (err, row) => {
     if (err) {
