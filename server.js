@@ -19,7 +19,7 @@ app.use(helmet({
     directives: {
       defaultSrc: ["'self'"],
       styleSrc: ["'self'", "'unsafe-inline'", "https://unpkg.com", "https://cdnjs.cloudflare.com"],
-      scriptSrc: ["'self'", "'unsafe-inline'", "https://unpkg.com", "https://cdn.jsdelivr.net"],
+      scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'", "https://unpkg.com", "https://cdn.jsdelivr.net"],
       imgSrc: ["'self'", "data:", "https:", "http:"],
       connectSrc: ["'self'"],
       fontSrc: ["'self'", "https://cdnjs.cloudflare.com"],
