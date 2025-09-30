@@ -7,6 +7,7 @@ const nodemailer = require('nodemailer');
 const session = require('express-session');
 const bcrypt = require('bcryptjs');
 const sqlite3 = require('sqlite3').verbose();
+const jwt = require('jsonwebtoken');
 const path = require('path');
 const fs = require('fs');
 require('dotenv').config();
@@ -32,13 +33,20 @@ app.use(helmet({
 }));
 app.use(cors());
 
+// JWT Configuration
+const JWT_SECRET = process.env.JWT_SECRET || 'your-super-secret-jwt-key-change-this-in-production';
+const JWT_EXPIRES_IN = '5m'; // 5 minutes for auto-login tokens
+
+// Token blacklist for preventing replay attacks (in production, use Redis)
+const tokenBlacklist = new Set();
+
 // Session configuration
 app.use(session({
   secret: process.env.SESSION_SECRET || 'fallback-secret-key',
   resave: false,
   saveUninitialized: false,
   cookie: {
-    secure: false, // Set to false to work with reverse proxy
+    secure: process.env.NODE_ENV === 'production', // Enable secure cookies in production
     httpOnly: true,
     maxAge: 24 * 60 * 60 * 1000 // 24 hours
   }
@@ -133,6 +141,57 @@ function requireAuth(req, res, next) {
     return next();
   } else {
     return res.redirect('/login');
+  }
+}
+
+// Check if user is already authenticated (for auto-login)
+function checkExistingAuth(req, res, next) {
+  if (req.session && req.session.userId) {
+    // User is already logged in, redirect to dashboard
+    return res.redirect('/dashboard');
+  }
+  // User not logged in, continue to auto-login process
+  next();
+}
+
+// JWT Token validation functions
+function verifyJWT(token) {
+  try {
+    // Check if token is blacklisted
+    if (tokenBlacklist.has(token)) {
+      throw new Error('Token has already been used');
+    }
+
+    // Verify token signature and expiry
+    const decoded = jwt.verify(token, JWT_SECRET);
+
+    // Validate required fields
+    if (!decoded.userId && !decoded.username) {
+      throw new Error('Invalid token: missing user identification');
+    }
+
+    // Check if token is not too old (additional safety check)
+    const tokenAge = Date.now() / 1000 - decoded.iat;
+    if (tokenAge > 5 * 60) { // 5 minutes in seconds
+      throw new Error('Token has expired');
+    }
+
+    return decoded;
+  } catch (error) {
+    throw new Error(`Token verification failed: ${error.message}`);
+  }
+}
+
+function blacklistToken(token) {
+  tokenBlacklist.add(token);
+
+  // Clean up old tokens periodically (in production, handle this with Redis TTL)
+  if (tokenBlacklist.size > 1000) {
+    // Simple cleanup - in production, use proper cache with TTL
+    const tokensArray = Array.from(tokenBlacklist);
+    tokenBlacklist.clear();
+    // Keep only recent half (this is a simple approach)
+    tokensArray.slice(-500).forEach(t => tokenBlacklist.add(t));
   }
 }
 
@@ -385,6 +444,96 @@ async function sendDesignToCustomer(orderId, customilPdfUrl, comment = '') {
   }
 }
 
+// Auto-login endpoint for trusted external website
+app.get('/auto-login', checkExistingAuth, async (req, res) => {
+  try {
+    const { token } = req.query;
+
+    // Validate token presence
+    if (!token) {
+      console.warn('Auto-login attempted without token');
+      return res.redirect('/login?error=missing_token');
+    }
+
+    console.log('Processing auto-login request...');
+
+    // Verify and decode JWT token
+    let decoded;
+    try {
+      decoded = verifyJWT(token);
+    } catch (error) {
+      console.error('JWT verification failed:', error.message);
+      return res.redirect('/login?error=invalid_token');
+    }
+
+    // Blacklist the token immediately to prevent reuse
+    blacklistToken(token);
+
+    // Extract user information from token
+    let user = null;
+
+    if (decoded.userId) {
+      // Look up user by ID
+      user = await new Promise((resolve, reject) => {
+        db.get('SELECT * FROM users WHERE id = ?', [decoded.userId], (err, row) => {
+          if (err) reject(err);
+          else resolve(row);
+        });
+      });
+    } else if (decoded.username) {
+      // Look up user by username
+      user = await new Promise((resolve, reject) => {
+        db.get('SELECT * FROM users WHERE username = ?', [decoded.username], (err, row) => {
+          if (err) reject(err);
+          else resolve(row);
+        });
+      });
+    }
+
+    if (!user) {
+      console.error('Auto-login failed: User not found', { userId: decoded.userId, username: decoded.username });
+      return res.redirect('/login?error=user_not_found');
+    }
+
+    // Create secure session
+    req.session.userId = user.id;
+    req.session.username = user.username;
+    req.session.autoLogin = true; // Flag to indicate this was an auto-login
+    req.session.loginTime = new Date().toISOString();
+
+    console.log(`Auto-login successful for user: ${user.username} (ID: ${user.id})`);
+
+    // Regenerate session ID for security
+    req.session.regenerate((err) => {
+      if (err) {
+        console.error('Session regeneration failed:', err);
+        return res.redirect('/login?error=session_error');
+      }
+
+      // Restore session data after regeneration
+      req.session.userId = user.id;
+      req.session.username = user.username;
+      req.session.autoLogin = true;
+      req.session.loginTime = new Date().toISOString();
+
+      // Save session and redirect to dashboard
+      req.session.save((err) => {
+        if (err) {
+          console.error('Session save failed:', err);
+          return res.redirect('/login?error=session_error');
+        }
+
+        console.log(`Auto-login completed successfully for ${user.username}`);
+        res.redirect('/dashboard?auto_login=success');
+      });
+    });
+
+  } catch (error) {
+    console.error('Auto-login error:', error);
+    res.redirect('/login?error=system_error');
+  }
+});
+
 // Root route - redirect to dashboard
 app.get('/', (req, res) => {
   if (req.session && req.session.userId) {
@@ -402,6 +551,19 @@ app.get('/health', (req, res) => {
     version: '1.0.0'
   });
 });
+
+// Helper function for error messages
+function getErrorMessage(errorCode) {
+  const errorMessages = {
+    '1': 'Invalid username or password',
+    'missing_token': 'Auto-login failed: Missing authentication token',
+    'invalid_token': 'Auto-login failed: Invalid or expired token',
+    'user_not_found': 'Auto-login failed: User account not found',
+    'session_error': 'Auto-login failed: Session error occurred',
+    'system_error': 'Auto-login failed: System error occurred'
+  };
+  return errorMessages[errorCode] || 'An error occurred during login';
+}
 
 // Login page
 app.get('/login', (req, res) => {
@@ -437,7 +599,7 @@ app.get('/login', (req, res) => {
                     <div class="bg-red-50 border border-red-200 rounded-lg p-4 mb-6">
                         <div class="flex items-center">
                             <i class="fas fa-exclamation-circle text-red-500 mr-2"></i>
-                            <span class="text-red-700 text-sm">Invalid username or password</span>
+                            <span class="text-red-700 text-sm">${getErrorMessage(req.query.error)}</span>
                         </div>
                     </div>
                 ` : ''}
@@ -589,6 +751,16 @@ app.get('/dashboard', requireAuth, (req, res) => {
     </head>
     <body class="bg-gray-50 min-h-screen">
         <div x-data="orderDashboard()" x-init="loadOrders()" class="container mx-auto px-4 py-8">
+            <!-- Auto-login success message -->
+            ${req.query.auto_login === 'success' ? `
+                <div class="bg-green-50 border border-green-200 rounded-lg p-4 mb-6">
+                    <div class="flex items-center">
+                        <i class="fas fa-check-circle text-green-500 mr-2"></i>
+                        <span class="text-green-700 text-sm">Successfully logged in via secure auto-login</span>
+                    </div>
+                </div>
+            ` : ''}
+
             <!-- Header -->
             <div class="bg-white rounded-lg shadow-sm p-6 mb-8">
                 <div class="flex items-center justify-between">
